@@ -1,6 +1,5 @@
 const Shopify = require('shopify-api-node');
 const csv = require('csvtojson');
-// const colors = require('colors');
 const chalk = require('chalk');
 const helpers = require('./helpers').helpers;
 
