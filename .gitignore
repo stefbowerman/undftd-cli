@@ -9,3 +9,6 @@ yarn-error.log*
 
 # Dependency directories
 node_modules/
+
+# Output directory
+output/

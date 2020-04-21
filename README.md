@@ -1,15 +1,34 @@
 # 👟 Undefeated CLI 👟
 
-Raffle Entry processing
+### Raffle Entry processing
 
-- Process CSV, find all the emails
+- Process CSV
+- Create a new `Entry` object for each row
 - ???  Check the address ??? Kick them out if they're not in CA?
-- For each email, look up on shopify
-- If they exist, push a custom object into the queue
+- For each entry, check shopify to see if the customer exists by email
+- If they exist, push a customer object into the queue
 - If they don't, create a new customer and then push the resulting object into the queue
 - ??? What to do about addresses? ??
 - Once we've collected all the emails in the queue, then start processing them and creating a draft order for each
 - Output to a CSV?
+
+
+##### 3 Step Process
+###### Step 1
+```
+Create an array of Customer objects that are all valid Shopify customers
+```
+
+###### Step 2
+```
+Loop through all those customer objects and create a new Shopify address for each based on what they input from viral sweep
+```
+
+###### Step 3
+```
+Loop through all the customer objects and create a draft order for each one.
+Capture the successes / failures with draft order IDs => output to CSV
+```
 
 
 
