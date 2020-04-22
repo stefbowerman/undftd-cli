@@ -19,11 +19,6 @@
 Create an array of Customer objects that are all valid Shopify customers
 ```
 
-###### Step 2
-```
-Loop through all those customer objects and create a new Shopify address for each based on what they input from viral sweep
-```
-
 ###### Step 3
 ```
 Loop through all the customer objects and create a draft order for each one.

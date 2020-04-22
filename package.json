@@ -6,8 +6,11 @@
   "dependencies": {
     "chalk": "^4.0.0",
     "csvtojson": "^2.0.10",
+    "fs-extra": "^9.0.0",
     "inquirer": "^7.1.0",
+    "json2csv": "^5.0.0",
     "limiter": "^1.1.5",
+    "progress": "^2.0.3",
     "shopify-api-node": "^3.3.1",
     "unquirer": "^1.0.0"
   },

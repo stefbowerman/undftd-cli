@@ -1,13 +1,16 @@
-const RateLimiter = require('limiter').RateLimiter
+const fs = require('fs-extra')
+const { RateLimiter } = require('limiter')
 const Shopify = require('shopify-api-node');
 const inquirer = require('inquirer');
 const csv = require('csvtojson');
+const { parse } = require('json2csv');
 const chalk = require('chalk');
-const helpers = require('./helpers').helpers;
+const ProgressBar = require('progress');
+const { helpers } = require('./helpers');
 
 // Classes to help us organize
-const Entry = require('./models/entry').Entry;
-const Customer = require('./models/customer').Customer;
+const { Entry } = require('./models/entry');
+const { Customer } = require('./models/customer');
 
 let config
 
@@ -27,13 +30,6 @@ const shopify = new Shopify({ shopName, apiKey, password });
 // Create the limiter to make sure we don't max out Shopify API call limits
 const limiter = new RateLimiter(4, 'second');
 
-// Set the variant ID that we're using for these draft orders
-const variantId = 6865994874914
-
-const defaultHeaders = ["EMAIL","IP","LOCATION","SHORT URL","DATE","INITIAL ENTRY","DAILY ENTRIES"," REFERRAL ENTRIES","BONUS ENTRIES","TOTAL ENTRIES","FIRST_NAME", "LAST_NAME","ADDRESS","CITY","STATE","ZIP","STYLE","SIZE","RESIDENT","I CONFIRM I LIVE IN CALIFORNIA  NEVADA OR ARIZONA AND WILL HAVE THE PRODUCT SHIPPED THE ADDRESS LISTED ABOVE.","AGREE_TO_RULES","ENTRY SOURCE","TOTAL REFERRALS","REFERRED BY","REFERRER SOURCE URL","ENTRY SOURCE URL","TRACKING CAMPAIGN NAME"];
-
-const customerQueue = []
-
 // Async removeTokens function
 function removeTokens(count, limiter) {
   return new Promise((resolve, reject) => {
@@ -44,76 +40,102 @@ function removeTokens(count, limiter) {
   })
 }
 
-
-// @TODO
-// Before anything, double check that the product exists on Shopify?
-
 function processEntries(entries = []) {
-  console.log(`${chalk.gray('Total entries found =')} ${chalk.green(entries.length)}`)
+  return new Promise((resolve, reject) => {
+    console.log(`${chalk.gray('Total entries found =')} ${chalk.green(entries.length)}`)
 
-  const entriesProcessed = []
-  const entriesFailed = []
-  const customerQueue = []
+    const entriesProcessed = []
+    const entriesFailed = []
+    const customerQueue = []
 
-  inquirer
-    .prompt([
-      {
-        type: 'confirm',
-        name: 'confirm',
-        message: `${entries.length} ${entries.length == 1 ? 'entry' : 'entries'} found in total.  Continue?`
-      }
-    ])
-    .then(async (answers) => {
-      if (answers.confirm === false) {
-        return;
-      }
-
-      for (const entry of entries) {
-        // console.log(`${chalk.gray('Found entry for...')}${chalk.green(entry.email)}`)
-
-        await removeTokens(1, limiter) // Wait for out limiter to let us proceed
- 
-        try {
-          const customer = await findOrCreateShopifyCustomer(entry);
-          console.log('successful try block')
-          console.log(customer)
-          // console.log(`${chalk.gray('New We have a customer to work with...')}${chalk.green(customer.id)}`)
-          customerQueue.push(customer)
-          entriesProcessed.push(customer);
-        } catch(e) {
-          console.log('something went wrong');
-          console.log(e)
-          entriesFailed(entry.email)
+    inquirer
+      .prompt([
+        {
+          type: 'confirm',
+          name: 'confirm',
+          message: `${entries.length} ${entries.length == 1 ? 'entry' : 'entries'} found in total. Continue?`
         }
-      }
+      ])
+      .then(async (answers) => {
+        if (answers.confirm === false) {
+          return;
+        }
 
-      console.log(`${chalk.gray('Total number of entries processed: ')} ${chalk.green(entriesProcessed.length)}`)
+        const bar = new ProgressBar('Processing CSV [:bar] :current/:total :percent :etas', {
+          complete: '=',
+          incomplete: ' ',
+          head: '👟',
+          total: entries.length,
+          width: 80
+        });
 
-      if (entriesProcessed.length !== entries.length) {
-        console.log('missed a couple')
-        console.log(entriesFailed)
-        // @TODO - output failures to CSV
-        return;
-      }
+        for (const entry of entries) {
+          // console.log(`${chalk.gray('Found entry for...')}${chalk.green(entry.email)}`)
 
-      // At this point, we've created an array of valid shopifyCustomers (customerQueue)
+          await removeTokens(1, limiter) // Wait for the limiter to tell us when we can hit the API
+   
+          try {
+            const customer = await findOrCreateShopifyCustomer(entry);
 
-      console.log(`${chalk.gray('Valid Shopify Customers: ')} ${chalk.green(customerQueue.length)}`)
-    })
-    .catch(error => {
-      if(error.isTtyError) {
-        // Prompt couldn't be rendered in the current environment
-      } else {
-        // Something else when wrong
-      }
-    });
+            // console.log('successful try block')
+            // console.log(customer)
+            // console.log(`${chalk.gray('New We have a customer to work with...')}${chalk.green(customer.id)}`)
+
+            bar.tick()
+
+            customerQueue.push(customer)
+            entriesProcessed.push(customer);
+          } catch(e) {
+            console.log('something went wrong');
+            console.log(e)
+            entriesFailed.push(entry.email)
+          }
+        }
+
+
+        console.log(`${chalk.gray('Total number of entries processed: ')} ${chalk.green(entriesProcessed.length)}`)
+
+        if (entriesProcessed.length !== entries.length) {
+          console.log('missed a couple')
+          console.log(entriesFailed)
+          // @TODO - output failures to CSV
+          return;
+        }
+
+        // At this point, we've created an array of valid shopifyCustomers (customerQueue)
+
+        console.log(`${chalk.gray('Valid Shopify Customers: ')} ${chalk.green(customerQueue.length)}`)
+
+        // console.log(customerQueue[0])
+        // console.log(customerQueue[0].fields)
+        // console.log(parse)
+
+        // Test - turn the customer queue into a csv of valid shopify customers
+        try {
+          const csv = parse(customerQueue, {fields: customerQueue[0].fields});
+          // console.log(csv)
+          fs.outputFileSync(`output/customers-queued-${Date.now()}.csv`, csv)
+        } catch (err) {
+          console.error(err);
+        }
+
+        resolve(entriesProcessed)
+      })
+      .catch(error => {
+        if(error.isTtyError) {
+          // Prompt couldn't be rendered in the current environment
+        } else {
+          // Something else when wrong
+        }
+      });
+  })
 }
 
 async function findOrCreateShopifyCustomer(entry) {
   return new Promise(function(resolve, reject) {
     
     function done(shopifyCustomer) {
-      console.log(`${chalk.magenta('complete!')}`)
+      // console.log(`${chalk.magenta('complete!')}`)
       resolve(new Customer({
         id: shopifyCustomer.id,
         email: shopifyCustomer.email,
@@ -122,15 +144,16 @@ async function findOrCreateShopifyCustomer(entry) {
     }
 
     searchForCustomerByEmail(entry.email, shopifyCustomer => {
-      console.log(`${chalk.green(entry.email)} customer found: ${shopifyCustomer.id}`);
+      // console.log(`${chalk.green(entry.email)} customer found: ${shopifyCustomer.id}`);
       done(shopifyCustomer)
     }, () => {
       console.log(`${chalk.red(entry.email)} does not exist - need to make a new customer`)
       shopify.customer.create({
         "first_name": entry.firstName,
         "last_name": entry.lastName,
-        "email": entry.email,
-        "tags": "CLI-TEST"
+        "email": entry.email
+        // ,
+        // "tags": "CLI-TEST"
       }, e => console.log(e))
         .then(done)
     })
@@ -167,7 +190,7 @@ class App {
             {
               type: 'confirm',
               name: 'confirm',
-              message: `Availability check successful.  Continue?`
+              message: `Availability check successful. Continue?`
             }
           ])
           .then(answers => {
@@ -219,21 +242,67 @@ class App {
     // Process CSV
     console.log(`${chalk.gray('Processing file')} ${this.csvFilePath}`)
 
+    const defaultHeaders = ["EMAIL","IP","LOCATION","SHORT URL","DATE","INITIAL ENTRY","DAILY ENTRIES"," REFERRAL ENTRIES","BONUS ENTRIES","TOTAL ENTRIES","FIRST_NAME", "LAST_NAME","ADDRESS","CITY","STATE","ZIP","STYLE","SIZE","RESIDENT","I CONFIRM I LIVE IN CALIFORNIA  NEVADA OR ARIZONA AND WILL HAVE THE PRODUCT SHIPPED THE ADDRESS LISTED ABOVE.","AGREE_TO_RULES","ENTRY SOURCE","TOTAL REFERRALS","REFERRED BY","REFERRER SOURCE URL","ENTRY SOURCE URL","TRACKING CAMPAIGN NAME"];
+
     csv({
       headers: defaultHeaders.map(header => helpers.camelize(header.replace('_', ' ').toLowerCase()))
     })
       .fromFile(this.csvFilePath)
-      .then((data) => {
+      .then(async (data) => {
         const entries = data.map((e) => new Entry(e));
-        processEntries(entries)
 
-        // Create shopifyCustomers
-        // Create and attach addresses
-        // Create draft orders
+        // Ensures that each entry is a shopify customer (checks if it exists, creates one if it doesn't)
+        const processedEntries = await processEntries(entries)
+
+        const createdDraftOrders = await this.createDraftOrdersForEntries(processedEntries)
+
+        // Test - turn the created draft orders into a csv so we have them for later
+        try {
+          const csv = parse(createdDraftOrders, {fields: ['id', 'email', 'created_at', 'name']});
+          // console.log(csv)
+          const filepath = `output/created-draft-orders-${Date.now()}.csv`
+          fs.outputFileSync(filepath, csv)
+          console.log(`${chalk.gray('Created draft orders outputted to ')} ${filepath}`)
+        } catch (err) {
+          console.error(err);
+        }
       })    
   }
-}
 
+  createDraftOrdersForEntries(entries = []) {
+    const createdDraftOrders = []
+    return new Promise(async (resolve, reject) => {
+      const bar = new ProgressBar('Creating draft orders [:bar] :current/:total :percent :etas', {
+        complete: '=',
+        incomplete: ' ',
+        head: '✏️',
+        total: entries.length,
+        width: 80
+      }); 
+           
+      for (const entry of entries) {
+        await removeTokens(1, limiter) // Wait for the limiter to tell us when we can hit the API 
+        
+        // @TODO - Need to add custom info, pull correct variant ID, etc, etc..
+        const draftOrder = await shopify.draftOrder.create({
+          line_items: [{
+            variant_id: 31881335734306,
+            quantity: 1
+          }],
+          customer: {
+            id: 709855379490
+          }
+        })
+
+        bar.tick()
+
+        createdDraftOrders.push(draftOrder)
+      }
+
+      resolve(createdDraftOrders)
+    })
+  }
+}
 
 return new App({
   productId: 4490351640610,

@@ -4,6 +4,10 @@ class Customer {
     this.id = id
     this.shippingAddress = shippingAddress
   }
+
+  get fields() {
+    return ['id', 'shippingAddress']
+  }
 }
 
 exports.Customer = Customer
