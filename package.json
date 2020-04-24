@@ -12,7 +12,8 @@
     "limiter": "^1.1.5",
     "progress": "^2.0.3",
     "shopify-api-node": "^3.3.1",
-    "unquirer": "^1.0.0"
+    "unquirer": "^1.0.0",
+    "yargs": "^15.3.1"
   },
   "devDependencies": {},
   "scripts": {

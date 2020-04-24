@@ -1,15 +1,35 @@
 const fs = require('fs-extra')
+const yargs = require('yargs')
 const { RateLimiter } = require('limiter')
 const Shopify = require('shopify-api-node');
-const inquirer = require('inquirer');
 const csv = require('csvtojson');
 const { parse } = require('json2csv');
 const chalk = require('chalk');
 const ProgressBar = require('progress');
-const { helpers } = require('./helpers');
+const { camelize } = require('./helpers/camelize');
+const { askConfirmation } = require('./helpers/askConfirmation')
 
 // Classes to help us organize
 const { Customer } = require('./models/customer');
+const { EntryFailure } = require('./models/entryFailure');
+
+// Handle scripts args
+const args = yargs
+  .option('filepath', {
+    type: 'string',
+    description: 'CSV filepath',
+    demandOption: true
+  })
+  // .option('dryrun', {
+  //   type: 'boolean',
+  //   description: 'Run without creating any objects inside Shopify'
+  // })
+  .option('verbose', {
+    alias: 'v',
+    type: 'boolean',
+    description: 'Run with verbose logging'
+  })
+  .argv
 
 let config
 
@@ -40,7 +60,11 @@ function removeTokens(count, limiter) {
 }
 
 // Config variables
-const csvFilePath = './entries-sample.csv'
+const csvFilePath = args.filepath
+const verbose = args.verbose
+const dryrun = args.dryrun
+const timestamp = Date.now() // Use this so all files output from this script share a common timestamp
+const outputDirectory = `./output/viral-sweeps/`
 const productId = 4490351640610
 
 // Map of size -> variant ID
@@ -68,8 +92,10 @@ async function main() {
   console.log(chalk.bgGreen.black('👟 UNDFTD CLI 👟'))
 
   // First check if the product is available and the mapping for it is correct
+  let product
+
   try {
-    await checkProductAvailability(productId, variantSizeMap)
+    product = await checkProductAvailability(productId, variantSizeMap)
   } catch(e) {
     process.exit(1);
   }
@@ -87,6 +113,7 @@ async function main() {
 
   // Now we need to turn the CSV into something usable
   let csvEntries = []
+
   try {
     csvEntries = await processCSVIntoEntryArray(csvFilePath)
     const confirmed = await askConfirmation(`${csvEntries.length} ${csvEntries.length == 1 ? 'entry' : 'entries'} found in total. Does this look correct?`)
@@ -98,6 +125,19 @@ async function main() {
     process.exit(1);
   }
 
+  // Now that we know how many entries we have, double check that we have enough product
+  if (product.total_quantity < csvEntries.length) {
+    try {
+      const confirmed = await askConfirmation('There are more entries than product quantity available. Are you sure you want to continue?')
+
+      if (!confirmed) {
+        process.exit(1);
+      }
+    } catch(e) {
+      process.exit(1);
+    }
+  }
+
   // Now we need to process each entry and turn it into a customer
   // Vars needs to be declared outside of the try/catch block because we need them in the next step
   let customers = []
@@ -106,21 +146,44 @@ async function main() {
   try {
     const data = await processEntriesIntoCustomerArray(csvEntries)
 
-    customers = data.customers
+    customers = data.successes
     failures = data.failures
 
-    // console.log(`Customers processed = ${customers.length}`)
+    console.log(`Number of customers processed successfully: ${chalk.green(customers.length)}`);
 
     if (failures.length) {
-      // @TODO Output these to a CSV?
+      try {
+        const failuresCSV = parse(failures, { fields: EntryFailure.csvFields() })
+        const filepath = `${outputDirectory}entries-failed-${timestamp}.csv`
+        fs.outputFileSync(filepath, failuresCSV)
+        console.log(`${chalk.red(failures.length)} entries failed to load as customers in Shopify`);
+        console.log(`${chalk.gray('List of entries failed to load as Shopify customers outputted to')} ${chalk.red(filepath)}`)
+        process.exit(1);  
+      }
+      catch(e) {
+        console.log(e)
+      }
     }
   } catch {
     process.exit(1);
   }
 
+  
+  try {
+    const confirmed = await askConfirmation(`You're about to create draft orders for ${customers.length} customers.  Are you sure you want to continue?`)
+
+    if (!confirmed) {
+      process.exit(1);
+    }
+  } catch(e) {
+    process.exit(1);
+  }  
+
   // Now that we have an array of customers, we can create draft orders for each
   try {
     const draftOrders = await createDraftOrdersForCustomerArray(customers)
+
+    verbose && console.log(`Successfully created ${chalk.inverse(draftOrders.length)} draft orders`)
 
     // Create a CSV with all the orders
     try {
@@ -131,7 +194,7 @@ async function main() {
                     },
                     {
                       value: 'name',
-                      label: 'Draft Order #'
+                      label: 'Name'
                     },
                     {
                       value: 'email',
@@ -147,7 +210,7 @@ async function main() {
                     }
                   ]})
 
-      const filepath = `output/viralSweeps-draftOrders-${Date.now()}.csv`
+      const filepath = `${outputDirectory}draft-orders-${timestamp}.csv`
       fs.outputFileSync(filepath, csv)
       console.log(`${chalk.gray('List of created draft orders outputted to')} ${chalk.green(filepath)}`)      
     } catch {
@@ -158,23 +221,8 @@ async function main() {
   } catch {
 
   }
-}
 
-// Wrapper around inquirer for simple confirmations
-function askConfirmation(message) {
-  return new Promise((resolve, reject) => {
-    inquirer
-      .prompt([
-        {
-          type: 'confirm',
-          name: 'confirm',
-          message: message
-        }
-      ])
-      .then(answers => {
-        resolve(answers.confirm && true)
-      })
-  })
+  console.log(`✅  ${chalk.bgGreen.black('VIRAL SWEEP DRAFT ORDER CREATION COMPLETE')}  ✅`)
 }
 
 function checkProductAvailability(productId, variantSizeMap) {
@@ -183,9 +231,11 @@ function checkProductAvailability(productId, variantSizeMap) {
   return new Promise(async (resolve, reject) => {
     try {
       const product = await shopify.product.get(productId)
-      console.log(`Product found: ${chalk.green(product.title)} - ${product.id}`)
-      console.log(`Total quantity available: ${chalk.green(product.variants.reduce(( acc, variant ) => acc + variant.inventory_quantity, 0))}`)
-      console.log(`${chalk.gray('Checking variant map...')}`)
+      product.total_quantity = product.variants.reduce(( acc, variant ) => acc + variant.inventory_quantity, 0)
+      console.log(`Product found: ${chalk.green(product.title)} (${product.id})`)
+      console.log(`Total quantity available: ${chalk.green(product.total_quantity)}`)
+      
+      verbose && console.log(`${chalk.gray('Checking variant map...')}`)
 
       const sizeOptionIndex = product.options.findIndex(option => option.name.toLowerCase() === 'size')
       let validationFlag = true
@@ -197,11 +247,12 @@ function checkProductAvailability(productId, variantSizeMap) {
           if (!found) {
             validationFlag = false
           }
-          console.log(`${chalk.gray('Checking size')} ${size} ${found ? /* chalk.green('Found')*/ '' : chalk.red('Not Found')}`)
+          
+          verbose && console.log(`${chalk.gray('Checking size')} ${size} ${found ? /* chalk.green('Found')*/ '' : chalk.red('Size not found')}`)  
         })
       }
 
-      validationFlag ? resolve() : reject('Product setup is incomplete')
+      validationFlag ? resolve(product) : reject('Product setup is incomplete')
     } catch (e) {
       console.log(e)
     }      
@@ -209,22 +260,26 @@ function checkProductAvailability(productId, variantSizeMap) {
 }
 
 function processCSVIntoEntryArray(filepath) {
-  console.log(`${chalk.gray('Processing file')} ${filepath}`)
   const defaultHeaders = ["EMAIL","IP","LOCATION","SHORT URL","DATE","INITIAL ENTRY","DAILY ENTRIES"," REFERRAL ENTRIES","BONUS ENTRIES","TOTAL ENTRIES","FIRST_NAME", "LAST_NAME","ADDRESS","CITY","STATE","ZIP","STYLE","SIZE","RESIDENT","I CONFIRM I LIVE IN CALIFORNIA  NEVADA OR ARIZONA AND WILL HAVE THE PRODUCT SHIPPED THE ADDRESS LISTED ABOVE.","AGREE_TO_RULES","ENTRY SOURCE","TOTAL REFERRALS","REFERRED BY","REFERRER SOURCE URL","ENTRY SOURCE URL","TRACKING CAMPAIGN NAME"];
+
+  verbose && console.log(`${chalk.gray('Processing file')} ${filepath}`)  
 
   return new Promise((resolve, reject) => {
     csv({
-      headers: defaultHeaders.map(header => helpers.camelize(header.replace('_', ' ').toLowerCase()))
+      headers: defaultHeaders.map(header => camelize(header.replace('_', ' ').toLowerCase()))
     })
       .fromFile(filepath)
-      .then(data => {
-        resolve(data)
-      })
+      .then(data => resolve(data))
   })
 }
 
+/*
+  Returns a promise that resolves with an object containing 2 properties
+  successes - array of Customer objects
+  failures - array of EntryFailure objects
+*/
 function processEntriesIntoCustomerArray(entries = []) {
-  const customers = []
+  const successes = []
   const failures = []
   const bar = new ProgressBar('Processing entries [:bar] :current/:total :percent :etas', {
     complete: '=',
@@ -236,23 +291,18 @@ function processEntriesIntoCustomerArray(entries = []) {
 
   return new Promise(async (resolve, reject) => {
     for (const entry of entries) {
-      // console.log(`${chalk.gray('Found entry for...')}${chalk.green(entry.email)}`)
-
       await removeTokens(1, limiter) // Wait for the limiter to tell us when we can hit the API
 
       try {
         const customer = await findOrCreateCustomer(entry);
-        // console.log(`${chalk.gray('New We have a customer to work with...')}${chalk.green(customer.id)}`)
-        customers.push(customer)
+        successes.push(customer)
         bar.tick()
       } catch(e) {
-        console.log('something went wrong');
-        console.log(e)
-        failures.push(entry.email)
+        failures.push(new EntryFailure({ entry }))
       }
     }
 
-    resolve({ customers, failures })
+    resolve({ successes, failures })
   })
 }
 
@@ -279,7 +329,6 @@ function createDraftOrdersForCustomerArray(customers = []) {
           id: customer.id
         },
         shipping_address: customer.formattedShippingAddress
-        // , note: 'ViralSweep entry'
       })
 
       draftOrders.push(draftOrder)
@@ -295,7 +344,6 @@ function createDraftOrdersForCustomerArray(customers = []) {
 // with size / product preference information
 function findOrCreateCustomer(entry) {
   return new Promise(function(resolve, reject) {
-    
     function done(shopifyCustomer) {
       const c = new Customer({
                       id: shopifyCustomer.id, // These are the only things we need from Shopify
@@ -314,12 +362,12 @@ function findOrCreateCustomer(entry) {
     }
 
     searchForCustomerByEmail(entry.email, shopifyCustomer => { done(shopifyCustomer) }, () => {
-      console.log(`${chalk.red(entry.email)} does not exist - need to make a new customer`)
+      verbose && console.log(`${chalk.red(entry.email)} does not exist - need to make a new customer`)
+
       shopify.customer.create({
-        "first_name": entry.firstName,
-        "last_name": entry.lastName,
-        "email": entry.email
-        // ,"tags": "CLI-TEST"
+        first_name: entry.firstName,
+        last_name: entry.lastName,
+        email: entry.email
       }, e => console.log(e))
         .then(done)
     })
@@ -335,4 +383,4 @@ function searchForCustomerByEmail(email, foundCB = () => {}, notfoundCB = () => 
     })  
 }
 
-main();
+main()
