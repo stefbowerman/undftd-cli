@@ -35,22 +35,24 @@ class Customer {
 
   // Returns an object meant for consumption by the Shopify API
   get formattedShippingAddress() {
-    return {
-      "address1": this.address,
-      // "address2": "",
-      "city": this.city,
-      //"company": "Fancy Co.",
+    const address = {
       "first_name": this.firstName,
       "last_name": this.lastName,
-      // "phone": "819-555-5555",
-      "province": this.state,
-      "province_code": this.stateCode,
-      "country": this.country,
-      "zip": this.zip,
-      "name": `${this.firstName} ${this.lastName}`,
-      "country_code": this.countryCode,
-      "country_name": this.country
+      "name": `${this.firstName} ${this.lastName}`
     }
+
+    if (this.address !== '') {
+      address.address1 = this.address
+      address.city = this.city
+      province = this.state
+      province_code = this.stateCode
+      country = this.country
+      zip = this.zip
+      country_code = this.countryCode
+      country_name = this.country
+    }
+
+    return address
   }
 }
 

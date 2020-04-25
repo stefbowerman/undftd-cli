@@ -12,5 +12,6 @@ yarn-error.log*
 # Dependency directories
 node_modules/
 
-# Output directory
+# Input / Output directory
+input/
 output/

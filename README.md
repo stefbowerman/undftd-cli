@@ -1,56 +1,31 @@
 # 👟 Undefeated CLI 👟
 
-### Raffle Entry processing
+Command line scripts for Undefeated.
 
-- Process CSV
-- Create a new `Entry` object for each row
-- ???  Check the address ??? Kick them out if they're not in CA?
-- For each entry, check shopify to see if the customer exists by email
-- If they exist, push a customer object into the queue
-- If they don't, create a new customer and then push the resulting object into the queue
-- ??? What to do about addresses? ??
-- Once we've collected all the emails in the queue, then start processing them and creating a draft order for each
-- Output to a CSV?
+### Scripts
 
+#### `viralSweep.js`
 
-##### 3 Step Process
-###### Step 1
+Pass in a CSV export from Viralsweep and this will create draft orders for each entry.  You must edit the variant size map with the appropriate variants for each size found in the CSV.  Receipt of any objects created or errors will be output to the `/output` directory.
+
 ```
-Create an array of Customer objects that are all valid Shopify customers
+Options:
+  --help         Show help                                             [boolean]
+  --version      Show version number                                   [boolean]
+  --filepath     CSV filepath                                [string] [required]
+  --size         Run script for a specific product size                 [string]
+  --verbose, -v  Run with verbose logging                              [boolean]
 ```
 
-###### Step 3
+#### `sendDraftOrderInvoices.js`
+
+Consumes a CSV output from the `viralSweep.js` script and sends an invoice for each draft order found.  Make sure to edit the `invoiceCustomMessage` variable inside the script which will be included inside the email.
+
 ```
-Loop through all the customer objects and create a draft order for each one.
-Capture the successes / failures with draft order IDs => output to CSV
+Options:
+  --help      Show help                                                [boolean]
+  --version   Show version number                                      [boolean]
+  --filepath  CSV filepath                                   [string] [required]
+  --dryrun    Run without creating any objects inside Shopify          [boolean]
+  --size      Run script for a specific product size                    [string]
 ```
-
-
-
-End result
-
-```javascript
-const variantId = 123456789
-const draftOrderQueue = [
-  {
-    "customer": {
-      "id": "12345abcdef"
-    }    
-  },
-  // ...
-  {
-    "customer": {
-      "id": "abcdef12345"
-    }    
-  }
-]
-
-const line_items = [{
-  "variant_id": variantId,
-  "quantity": 1
-}]
-
-drafOrderQueue.forEach( customer => {
-  shopify.draftOrder.create({ line_items, customer })
-})
-````

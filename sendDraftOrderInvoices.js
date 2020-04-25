@@ -1,12 +1,13 @@
 const fs = require('fs-extra')
 const yargs = require('yargs')
 const { RateLimiter } = require('limiter')
-const Shopify = require('shopify-api-node');
-const csv = require('csvtojson');
-const { parse } = require('json2csv');
-const chalk = require('chalk');
-const ProgressBar = require('progress');
-const { camelize } = require('./helpers/camelize');
+const Shopify = require('shopify-api-node')
+const csv = require('csvtojson')
+const { parse } = require('json2csv')
+const chalk = require('chalk')
+const ProgressBar = require('progress')
+const { camelize } = require('./helpers/camelize')
+const { askConfirmation } = require('./helpers/askConfirmation')
 
 // Classes to help us organize data
 const { Invoice } = require('./models/invoice');
@@ -22,6 +23,10 @@ const args = yargs
   .option('dryrun', {
     type: 'boolean',
     description: 'Run without creating any objects inside Shopify'
+  })
+  .option('size', {
+    type: 'string',
+    description: 'Run script for a specific product size'
   })
   .argv
 
@@ -57,6 +62,7 @@ function removeTokens(count, limiter) {
 const csvFilePath = args.filepath
 const verbose = args.verbose
 const dryrun = args.dryrun
+const size = args.size
 const timestamp = Date.now() // Use this so all files output from this script share a common timestamp
 const outputDirectory = `./output/send-draft-order-invoices/`
 const invoiceCustomMessage = 'Thank you for ordering from Undefeated.  Please complete your purchase within 24 hours.'
@@ -67,6 +73,29 @@ async function main() {
   if (dryrun) {
     console.log(chalk.gray('Running in dry mode..'))
   }
+
+  // Check that we're on the right store
+  try {
+    const confirmed = await askConfirmation(`Script is running against the shop at ${chalk.inverse(shopify.options.shopName)}. Is this correct?`)
+
+    if (!confirmed) {
+      process.exit(1);
+    }
+  } catch(e) {
+    process.exit(1);
+  }
+
+  if(size != undefined) {
+    try {
+      const confirmed = await askConfirmation(`Running script for size ${chalk.green(size)}.  Is this correct?`)
+
+      if (!confirmed) {
+        process.exit(1);
+      }
+    } catch(e) {
+      process.exit(1);
+    }
+  }  
 
   // Turn the csv into an array of objects
   let draftOrders = []
@@ -97,14 +126,14 @@ async function main() {
       if (successes.length) {
         // Create the CSV
         const successesCSV = parse(successes, { fields: Invoice.csvFields() })
-        const filepath = `${outputDirectory}invoices-sent-${timestamp}.csv`
+        const filepath = `${outputDirectory}invoices-sent${size && `-size${size}`}-${timestamp}.csv`
         fs.outputFileSync(filepath, successesCSV)
         console.log(`${chalk.gray('List of sent invoices outputted to')} ${chalk.green(filepath)}`)
       }
 
       if (failures.length) {
         const failuresCSV = parse(failures, { fields: InvoiceFailure.csvFields() })
-        const filepath = `${outputDirectory}invoices-failed-${timestamp}.csv`
+        const filepath = `${outputDirectory}invoices-failed${size && `-size${size}`}-${timestamp}.csv`
         fs.outputFileSync(filepath, failuresCSV)
         console.log(`${chalk.gray('List of failed invoices outputted to')} ${chalk.red(filepath)}`)
       }

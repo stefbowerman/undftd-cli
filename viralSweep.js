@@ -1,12 +1,12 @@
 const fs = require('fs-extra')
 const yargs = require('yargs')
 const { RateLimiter } = require('limiter')
-const Shopify = require('shopify-api-node');
-const csv = require('csvtojson');
-const { parse } = require('json2csv');
-const chalk = require('chalk');
-const ProgressBar = require('progress');
-const { camelize } = require('./helpers/camelize');
+const Shopify = require('shopify-api-node')
+const csv = require('csvtojson')
+const { parse } = require('json2csv')
+const chalk = require('chalk')
+const ProgressBar = require('progress')
+const { camelize } = require('./helpers/camelize')
 const { askConfirmation } = require('./helpers/askConfirmation')
 
 // Classes to help us organize
@@ -24,6 +24,10 @@ const args = yargs
   //   type: 'boolean',
   //   description: 'Run without creating any objects inside Shopify'
   // })
+  .option('size', {
+    type: 'string',
+    description: 'Run script for a specific size'
+  })
   .option('verbose', {
     alias: 'v',
     type: 'boolean',
@@ -63,6 +67,7 @@ function removeTokens(count, limiter) {
 const csvFilePath = args.filepath
 const verbose = args.verbose
 const dryrun = args.dryrun
+const size = args.size
 const timestamp = Date.now() // Use this so all files output from this script share a common timestamp
 const outputDirectory = `./output/viral-sweeps/`
 const productId = 4490351640610
@@ -91,6 +96,17 @@ const variantSizeMap = {
 async function main() {
   console.log(chalk.bgGreen.black('👟 UNDFTD CLI 👟'))
 
+  // Check that we're on the right store
+  try {
+    const confirmed = await askConfirmation(`Script is running against the shop at ${chalk.inverse(shopify.options.shopName)}. Is this correct?`)
+
+    if (!confirmed) {
+      process.exit(1);
+    }
+  } catch(e) {
+    process.exit(1);
+  }  
+
   // First check if the product is available and the mapping for it is correct
   let product
 
@@ -109,6 +125,25 @@ async function main() {
     }
   } catch(e) {
     process.exit(1);
+  }
+
+  if(size != undefined) {
+    if(verbose) {
+      try {
+        const confirmed = await askConfirmation(`Running script for size ${chalk.green(size)}.  Is this correct?`)
+
+        if (!confirmed) {
+          process.exit(1);
+        }
+      } catch(e) {
+        process.exit(1);
+      }
+    }
+
+    if(!variantSizeMap.hasOwnProperty(size)) {
+      console.log(chalk.red(`No variant found for product in size ${size}`));
+      process.exit(1)
+    }
   }
 
   // Now we need to turn the CSV into something usable
@@ -159,8 +194,7 @@ async function main() {
         console.log(`${chalk.red(failures.length)} entries failed to load as customers in Shopify`);
         console.log(`${chalk.gray('List of entries failed to load as Shopify customers outputted to')} ${chalk.red(filepath)}`)
         process.exit(1);  
-      }
-      catch(e) {
+      } catch(e) {
         console.log(e)
       }
     }
@@ -210,7 +244,7 @@ async function main() {
                     }
                   ]})
 
-      const filepath = `${outputDirectory}draft-orders-${timestamp}.csv`
+      const filepath = `${outputDirectory}draft-orders${size && `-size${size}`}-${timestamp}.csv`
       fs.outputFileSync(filepath, csv)
       console.log(`${chalk.gray('List of created draft orders outputted to')} ${chalk.green(filepath)}`)      
     } catch {
@@ -318,9 +352,9 @@ function createDraftOrdersForCustomerArray(customers = []) {
 
   return new Promise(async (resolve, reject) => {
     for (const customer of customers) {
-      await removeTokens(1, limiter) // Wait for the limiter to tell us when we can hit the API 
-      
-      const draftOrder = await shopify.draftOrder.create({
+      await removeTokens(1, limiter) // Wait for the limiter to tell us when we can hit the API
+
+      const params = {
         line_items: [{
           variant_id: variantSizeMap[customer.size], // @TODO - Need to handle case where this fails?  Or map all entries and do this check up front...
           quantity: 1
@@ -329,7 +363,9 @@ function createDraftOrdersForCustomerArray(customers = []) {
           id: customer.id
         },
         shipping_address: customer.formattedShippingAddress
-      })
+      }
+      
+      const draftOrder = await shopify.draftOrder.create(params)
 
       draftOrders.push(draftOrder)
       bar.tick()
