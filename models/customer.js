@@ -44,12 +44,12 @@ class Customer {
     if (this.address !== '') {
       address.address1 = this.address
       address.city = this.city
-      province = this.state
-      province_code = this.stateCode
-      country = this.country
-      zip = this.zip
-      country_code = this.countryCode
-      country_name = this.country
+      address.province = this.state
+      address.province_code = this.stateCode
+      address.country = this.country
+      address.zip = this.zip
+      address.country_code = this.countryCode
+      address.country_name = this.country
     }
 
     return address

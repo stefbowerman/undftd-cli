@@ -24,9 +24,9 @@ const args = yargs
   //   type: 'boolean',
   //   description: 'Run without creating any objects inside Shopify'
   // })
-  .option('size', {
+  .option('sku', {
     type: 'string',
-    description: 'Run script for a specific size'
+    description: 'Run script for a specific sku'
   })
   .option('verbose', {
     alias: 'v',
@@ -67,30 +67,30 @@ function removeTokens(count, limiter) {
 const csvFilePath = args.filepath
 const verbose = args.verbose
 const dryrun = args.dryrun
-const size = args.size
+const sku = args.sku
 const timestamp = Date.now() // Use this so all files output from this script share a common timestamp
 const outputDirectory = `./output/viral-sweeps/`
-const productId = 4490351640610
+const productId = 4423674232905
 
-// Map of size -> variant ID
-const variantSizeMap = {
-  '4': 31881335734306,
-  '5': 31881335767074,
-  '6': 31881335799842,
-  '6.5': 31881335832610,
-  '7': 31881335865378,
-  '7.5': 31881335898146,
-  '8': 31881335930914,
-  '8.5': 31881335963682,
-  '9': 31881335996450,
-  '9.5': 31881336029218,
-  '10': 31881336061986,
-  '10.5': 31881336094754,
-  '11': 31881336127522,
-  '11.5': 31881336160290,
-  '12': 31881336193058,
-  '13': 31881336225826,
-  '14': 31881336258594
+// Map of sku -> variant ID
+const skuVariantMap = {
+  'AR4237-005---4': 31373263372361,
+  'AR4237-005---5': 31373263405129,
+  'AR4237-005---6': 31373263437897,
+  'AR4237-005---6.5': 31373263470665,
+  'AR4237-005---7': 31373263503433,
+  'AR4237-005---7.5': 31373263536201,
+  'AR4237-005---8': 31373263601737,
+  'AR4237-005---8.5': 31373263667273,
+  'AR4237-005---9': 31373263765577,
+  'AR4237-005---9.5': 31373263798345,
+  'AR4237-005---10': 31373263863881,
+  'AR4237-005---10.5': 31373263962185,
+  'AR4237-005---11': 31373264060489,
+  'AR4237-005---11.5': 31373264158793,
+  'AR4237-005---12': 31373264257097,
+  'AR4237-005---13': 31373264289865,
+  'AR4237-005---14': 31373264322633
 }
 
 async function main() {
@@ -111,7 +111,7 @@ async function main() {
   let product
 
   try {
-    product = await checkProductAvailability(productId, variantSizeMap)
+    product = await checkProductAvailability(productId, skuVariantMap)
   } catch(e) {
     process.exit(1);
   }
@@ -127,10 +127,10 @@ async function main() {
     process.exit(1);
   }
 
-  if(size != undefined) {
+  if(sku != undefined) {
     if(verbose) {
       try {
-        const confirmed = await askConfirmation(`Running script for size ${chalk.green(size)}.  Is this correct?`)
+        const confirmed = await askConfirmation(`Running script for SKU ${chalk.green(sku)}.  Is this correct?`)
 
         if (!confirmed) {
           process.exit(1);
@@ -140,8 +140,8 @@ async function main() {
       }
     }
 
-    if(!variantSizeMap.hasOwnProperty(size)) {
-      console.log(chalk.red(`No variant found for product in size ${size}`));
+    if(!skuVariantMap.hasOwnProperty(sku)) {
+      console.log(chalk.red(`No variant found for SKU ${sku}`));
       process.exit(1)
     }
   }
@@ -244,7 +244,7 @@ async function main() {
                     }
                   ]})
 
-      const filepath = `${outputDirectory}draft-orders${size && `-size${size}`}-${timestamp}.csv`
+      const filepath = `${outputDirectory}draft-orders${sku && `-${sku}`}-${timestamp}.csv`
       fs.outputFileSync(filepath, csv)
       console.log(`${chalk.gray('List of created draft orders outputted to')} ${chalk.green(filepath)}`)      
     } catch {
@@ -259,7 +259,7 @@ async function main() {
   console.log(`✅  ${chalk.bgGreen.black('VIRAL SWEEP DRAFT ORDER CREATION COMPLETE')}  ✅`)
 }
 
-function checkProductAvailability(productId, variantSizeMap) {
+function checkProductAvailability(productId, skuVariantMap) {
   console.log(`${chalk.gray('Checking for product availability...')}`)
 
   return new Promise(async (resolve, reject) => {
@@ -269,24 +269,20 @@ function checkProductAvailability(productId, variantSizeMap) {
       console.log(`Product found: ${chalk.green(product.title)} (${product.id})`)
       console.log(`Total quantity available: ${chalk.green(product.total_quantity)}`)
       
-      verbose && console.log(`${chalk.gray('Checking variant map...')}`)
+      verbose && console.log(`${chalk.gray('Checking sku variant map...')}`)
 
-      const sizeOptionIndex = product.options.findIndex(option => option.name.toLowerCase() === 'size')
-      let validationFlag = true
+      const skusNotFound = []
+      for (let [sku, variantId] of Object.entries(skuVariantMap)) {
+        const variant = product.variants.find(variant => (variant.sku === sku && variant.id == variantId))
 
-      if (sizeOptionIndex !== undefined) {
-        product.variants.forEach(variant => {
-          const size = variant[`option${sizeOptionIndex+1}`]
-          const found = variantSizeMap.hasOwnProperty(size)
-          if (!found) {
-            validationFlag = false
-          }
-          
-          verbose && console.log(`${chalk.gray('Checking size')} ${size} ${found ? /* chalk.green('Found')*/ '' : chalk.red('Size not found')}`)  
-        })
+        if(!variant) {
+          skusNotFound.push(sku)
+        }
+
+        verbose && console.log(`${chalk.gray('Checking SKU')} ${sku} ${variant ? `${chalk.green('Found')} ${chalk.grey(`- total inventory: ${variant.inventory_quantity}`)}` : chalk.red('No variant found for SKU')}`) 
       }
 
-      validationFlag ? resolve(product) : reject('Product setup is incomplete')
+      skusNotFound.length == 0 ? resolve(product) : reject('Product setup is incomplete')
     } catch (e) {
       console.log(e)
     }      
@@ -294,7 +290,8 @@ function checkProductAvailability(productId, variantSizeMap) {
 }
 
 function processCSVIntoEntryArray(filepath) {
-  const defaultHeaders = ["EMAIL","IP","LOCATION","SHORT URL","DATE","INITIAL ENTRY","DAILY ENTRIES"," REFERRAL ENTRIES","BONUS ENTRIES","TOTAL ENTRIES","FIRST_NAME", "LAST_NAME","ADDRESS","CITY","STATE","ZIP","STYLE","SIZE","RESIDENT","I CONFIRM I LIVE IN CALIFORNIA  NEVADA OR ARIZONA AND WILL HAVE THE PRODUCT SHIPPED THE ADDRESS LISTED ABOVE.","AGREE_TO_RULES","ENTRY SOURCE","TOTAL REFERRALS","REFERRED BY","REFERRER SOURCE URL","ENTRY SOURCE URL","TRACKING CAMPAIGN NAME"];
+  const defaultHeaders = "EMAIL,FIRST_NAME,LAST_NAME,ADDRESS,CITY,STATE,ZIP,STYLE,SIZE".split(',')
+  // const defaultHeaders = ["EMAIL","IP","LOCATION","SHORT URL","DATE","INITIAL ENTRY","DAILY ENTRIES"," REFERRAL ENTRIES","BONUS ENTRIES","TOTAL ENTRIES","FIRST_NAME", "LAST_NAME","ADDRESS","CITY","STATE","ZIP","STYLE","SIZE","RESIDENT","I CONFIRM I LIVE IN CALIFORNIA  NEVADA OR ARIZONA AND WILL HAVE THE PRODUCT SHIPPED THE ADDRESS LISTED ABOVE.","AGREE_TO_RULES","ENTRY SOURCE","TOTAL REFERRALS","REFERRED BY","REFERRER SOURCE URL","ENTRY SOURCE URL","TRACKING CAMPAIGN NAME"];
 
   verbose && console.log(`${chalk.gray('Processing file')} ${filepath}`)  
 
@@ -356,7 +353,7 @@ function createDraftOrdersForCustomerArray(customers = []) {
 
       const params = {
         line_items: [{
-          variant_id: variantSizeMap[customer.size], // @TODO - Need to handle case where this fails?  Or map all entries and do this check up front...
+          variant_id: skuVariantMap[customer.size],
           quantity: 1
         }],
         customer: {
@@ -404,8 +401,8 @@ function findOrCreateCustomer(entry) {
         first_name: entry.firstName,
         last_name: entry.lastName,
         email: entry.email
-      }, e => console.log(e))
-        .then(done)
+      })
+        .then(done, (e) => console.log(e))
     })
   })
 }
@@ -415,7 +412,8 @@ function searchForCustomerByEmail(email, foundCB = () => {}, notfoundCB = () => 
     query: `email:${email.trim()}`
   })
     .then(customers => {
-      customers.length === 1 ? foundCB(customers[0]) : notfoundCB()
+      const c = customers.find(c => c.email.toLowerCase() === email.toLowerCase()) // Shopify can spit back multiple accounts for the same email email@address.com OR email+text@address.com
+      c ? foundCB(c) : notfoundCB()
     })  
 }
 

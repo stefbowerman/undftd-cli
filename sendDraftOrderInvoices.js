@@ -24,9 +24,9 @@ const args = yargs
     type: 'boolean',
     description: 'Run without creating any objects inside Shopify'
   })
-  .option('size', {
+  .option('sku', {
     type: 'string',
-    description: 'Run script for a specific product size'
+    description: 'Run script for a specific product SKU'
   })
   .argv
 
@@ -62,10 +62,10 @@ function removeTokens(count, limiter) {
 const csvFilePath = args.filepath
 const verbose = args.verbose
 const dryrun = args.dryrun
-const size = args.size
+const sku = args.sku
 const timestamp = Date.now() // Use this so all files output from this script share a common timestamp
 const outputDirectory = `./output/send-draft-order-invoices/`
-const invoiceCustomMessage = 'Thank you for ordering from Undefeated.  Please complete your purchase within 24 hours.'
+const invoiceCustomMessage = 'Congratulations, you have been selected to purchase the Fear Of God 1 - Offnoir. You have 24-hours to complete your purchase, links to purchase expire after 24-hours.\n\nThank you,\nUndefeated Raffle Team'
 
 async function main() {
   console.log(chalk.bgGreen.black('👟 UNDFTD CLI 👟'))
@@ -85,9 +85,9 @@ async function main() {
     process.exit(1);
   }
 
-  if(size != undefined) {
+  if(sku != undefined) {
     try {
-      const confirmed = await askConfirmation(`Running script for size ${chalk.green(size)}.  Is this correct?`)
+      const confirmed = await askConfirmation(`Running script for SKU ${chalk.green(sku)}.  Is this correct?`)
 
       if (!confirmed) {
         process.exit(1);
@@ -126,14 +126,14 @@ async function main() {
       if (successes.length) {
         // Create the CSV
         const successesCSV = parse(successes, { fields: Invoice.csvFields() })
-        const filepath = `${outputDirectory}invoices-sent${size && `-size${size}`}-${timestamp}.csv`
+        const filepath = `${outputDirectory}invoices-sent${sku && `-${sku}`}-${timestamp}.csv`
         fs.outputFileSync(filepath, successesCSV)
         console.log(`${chalk.gray('List of sent invoices outputted to')} ${chalk.green(filepath)}`)
       }
 
       if (failures.length) {
         const failuresCSV = parse(failures, { fields: InvoiceFailure.csvFields() })
-        const filepath = `${outputDirectory}invoices-failed${size && `-size${size}`}-${timestamp}.csv`
+        const filepath = `${outputDirectory}invoices-failed${sku && `-${sku}`}-${timestamp}.csv`
         fs.outputFileSync(filepath, failuresCSV)
         console.log(`${chalk.gray('List of failed invoices outputted to')} ${chalk.red(filepath)}`)
       }
